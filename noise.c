@@ -25,7 +25,11 @@ void sample_noise(Lattice *lat, double p) {
 void print_noise(Lattice *lat) {
     printf("[noise] qubit errors:\n");
     for (int q = 0; q < lat->num_qubits; q++) {
-        if (lat->errors[q] != 0) printf("q%d=%d ", q, lat->errors[q]);
+        if (lat->errors[q] != 0) {
+            int x, y;
+            qubit_coords(lat->d, q, &x, &y);
+            printf("q(%d,%d)=%d ", x, y, lat->errors[q]);
+        }
     }
     printf("\n");
 }

@@ -30,11 +30,15 @@ void compute_syndrome(Lattice *lat) {
 void print_syndrome(Lattice *lat) {
     printf("X syndrome:\n");
     for (int i = 0; i < lat->num_x_stabilizers; i++) {
-        printf("  X[%d] at (%d,%d): %d\n", i, lat->x_stabilizers[i].x, lat->x_stabilizers[i].y, lat->x_syndrome[i]);
+        if (lat->x_syndrome[i] != 0) {
+            printf("  X[%d] at (%d,%d): %d\n", i, lat->x_stabilizers[i].x, lat->x_stabilizers[i].y, lat->x_syndrome[i]);
+        }
     }
 
     printf("Z syndrome:\n");
     for (int i = 0; i < lat->num_z_stabilizers; i++) {
-        printf("  Z[%d] at (%d,%d): %d\n", i, lat->z_stabilizers[i].x, lat->z_stabilizers[i].y, lat->z_syndrome[i]);
+        if (lat->z_syndrome[i] != 0) {
+            printf("  Z[%d] at (%d,%d): %d\n", i, lat->z_stabilizers[i].x, lat->z_stabilizers[i].y, lat->z_syndrome[i]);
+        }
     }
 }
