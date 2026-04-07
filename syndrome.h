@@ -4,5 +4,6 @@
 #include "lattice.h"
 
 void compute_syndrome(Lattice *lat);
+void print_syndrome(Lattice *lat);
 
 #endif
