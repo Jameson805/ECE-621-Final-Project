@@ -1,18 +1,19 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -std=c11 -O2
+CXX = g++
+CXXFLAGS = -Wall -Wextra -std=c++17 -O2
 
 TARGET = sim
 
-SRCS = main.c lattice.c noise.c syndrome.c decoder.c simulate.c
-OBJS = $(SRCS:.c=.o)
+SRCS = main.cpp lattice.cpp noise.cpp syndrome.cpp decoder.cpp simulate.cpp
+OBJS = $(SRCS:.cpp=.o)
 
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS)
 
-%.o: %.c
-	$(CC) $(CFLAGS) -c $<
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(OBJS) $(TARGET)
+	
