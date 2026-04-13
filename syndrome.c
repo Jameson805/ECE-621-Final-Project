@@ -28,14 +28,14 @@ void compute_syndrome(Lattice *lat) {
 }
 
 void print_syndrome(Lattice *lat) {
-    printf("X syndrome:\n");
+    printf("X defects:\n");
     for (int i = 0; i < lat->num_x_stabilizers; i++) {
         if (lat->x_syndrome[i] != 0) {
             printf("  X[%d] at (%d,%d): %d\n", i, lat->x_stabilizers[i].x, lat->x_stabilizers[i].y, lat->x_syndrome[i]);
         }
     }
 
-    printf("Z syndrome:\n");
+    printf("Z defects:\n");
     for (int i = 0; i < lat->num_z_stabilizers; i++) {
         if (lat->z_syndrome[i] != 0) {
             printf("  Z[%d] at (%d,%d): %d\n", i, lat->z_stabilizers[i].x, lat->z_stabilizers[i].y, lat->z_syndrome[i]);

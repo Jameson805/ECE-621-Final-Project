@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -std=c11 -O2
 
 TARGET = sim
 
-SRCS = main.c lattice.c noise.c syndrome.c mwpm.c simulate.c
+SRCS = main.c lattice.c noise.c syndrome.c decoder.c simulate.c
 OBJS = $(SRCS:.c=.o)
 
 all: $(TARGET)

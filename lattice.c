@@ -90,11 +90,24 @@ void init_lattice(Lattice *lat, int d) {
 }
 
 void free_lattice(Lattice *lat) {
+    if (!lat) return;
+
     free(lat->x_stabilizers);
     free(lat->z_stabilizers);
     free(lat->errors);
     free(lat->x_syndrome);
     free(lat->z_syndrome);
+
+    lat->x_stabilizers = NULL;
+    lat->z_stabilizers = NULL;
+    lat->errors = NULL;
+    lat->x_syndrome = NULL;
+    lat->z_syndrome = NULL;
+
+    lat->num_qubits = 0;
+    lat->num_x_stabilizers = 0;
+    lat->num_z_stabilizers = 0;
+    lat->d = 0;
 }
 
 int qubit_index(int d, int x, int y) {
@@ -122,6 +135,8 @@ void print_stabilizer(Lattice *lat, Stabilizer *stab, const char *type, int idx)
 }
 
 void print_lattice(Lattice *lat) {
+    if (!lat) return;
+
     printf("=== Lattice d=%d ===\n", lat->d);
     printf("Qubits: %d\n", lat->num_qubits);
     printf("X stabilizers: %d\n", lat->num_x_stabilizers);
