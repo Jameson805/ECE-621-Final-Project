@@ -37,6 +37,11 @@ public:
     Lattice(int d);
     void build(int d);
     void print() const;
+    void reset() {
+        std::fill(errors.begin(), errors.end(), Pauli::I);
+        x_defects.clear();
+        z_defects.clear();
+    }
 };
 
 int qubit_index(int d, int x, int y);

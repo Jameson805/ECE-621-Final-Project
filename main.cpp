@@ -4,9 +4,10 @@
 int main() {
     std::cout << "Starting simulation...\n";
 
-    int d = 5; // code distance
-    double p = 0.2; // error probability
-    run_simulation(d, p);
+    int d = 11; // code distance
+    double p = 0.05; // error probability
+    SimConfig config{d, p};
+    run_monte_carlo(config, 1000);
 
     std::cout << "Done.\n";
     return 0;
