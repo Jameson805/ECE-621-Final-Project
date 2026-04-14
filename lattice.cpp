@@ -6,8 +6,6 @@ Lattice::Lattice(int d) {
 }
 
 void Lattice::build(int d) {
-    std::cout << "[lattice] initializing d=" << d << "\n";
-
     this->d = d;
     num_qubits = d * d;
 

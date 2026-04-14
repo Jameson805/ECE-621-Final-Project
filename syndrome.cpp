@@ -10,8 +10,6 @@ static inline bool anti_commutes_with_z(Pauli p) {
 }
 
 void compute_syndrome(Lattice &lat) {
-    std::cout << "[syndrome] computing defects...\n";
-
     lat.x_defects.clear();
     lat.z_defects.clear();
 

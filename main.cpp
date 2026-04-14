@@ -4,7 +4,9 @@
 int main() {
     std::cout << "Starting simulation...\n";
 
-    run_simulation();
+    int d = 5; // code distance
+    double p = 0.2; // error probability
+    run_simulation(d, p);
 
     std::cout << "Done.\n";
     return 0;

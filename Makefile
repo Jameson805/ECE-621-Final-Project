@@ -3,7 +3,7 @@ CXXFLAGS = -Wall -Wextra -std=c++17 -O2
 
 TARGET = sim
 
-SRCS = main.cpp lattice.cpp noise.cpp syndrome.cpp decoder.cpp simulate.cpp
+SRCS = main.cpp simulate.cpp lattice.cpp noise.cpp syndrome.cpp decoder.cpp correction.cpp logical.cpp
 OBJS = $(SRCS:.cpp=.o)
 
 all: $(TARGET)

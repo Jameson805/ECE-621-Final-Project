@@ -5,8 +5,6 @@
 // Depolarizing noise model
 // TODO: add support for different noise models and automatic selection
 void sample_noise(Lattice &lat, double p) {
-    std::cout << "[noise] sampling noise for d=" << lat.d << "\n";
-
     static std::mt19937 rng(12345);
     std::uniform_real_distribution<double> prob(0.0, 1.0);
     std::uniform_int_distribution<int> pauli(1, 3);
