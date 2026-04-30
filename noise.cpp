@@ -3,19 +3,16 @@
 #include "noise.hpp"
 
 // Depolarizing noise model
-// TODO: add support for different noise models and automatic selection
 void sample_noise(Lattice &lat, double p) {
-    static std::mt19937 rng(12345);
+    // Note: Consider moving the rng initialization outside to avoid identical seeds
+    static std::mt19937 rng(12345); 
     std::uniform_real_distribution<double> prob(0.0, 1.0);
     std::uniform_int_distribution<int> pauli(1, 3);
 
     for (int q = 0; q < lat.num_qubits; q++) {
-        double r = prob(rng);
-
-        if (r < p) {
-            lat.errors[q] = static_cast<Pauli>(pauli(rng));
-        } else {
-            lat.errors[q] = Pauli::I;
+        if (prob(rng) < p) {
+            Pauli new_error = static_cast<Pauli>(pauli(rng));
+            lat.errors[q] = static_cast<Pauli>(lat.errors[q] ^ new_error); 
         }
     }
 }

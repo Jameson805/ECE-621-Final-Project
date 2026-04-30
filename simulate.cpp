@@ -1,4 +1,6 @@
 #include <iostream>
+#include <fstream>
+#include <iomanip>
 #include "simulate.hpp"
 #include "lattice.hpp"
 #include "noise.hpp"
@@ -9,13 +11,57 @@
 
 LogicalResult run_single_simulation(const SimConfig& config, Lattice& lat, const DecoderGraph& x_graph, const DecoderGraph& z_graph) {
     lat.reset();
-    sample_noise(lat, config.p);
-    compute_syndrome(lat);
+    compute_syndrome(lat, config);
     std::vector<CorrectionMatch> x_matches = run_mwpm(lat.x_defects, x_graph);
     std::vector<CorrectionMatch> z_matches = run_mwpm(lat.z_defects, z_graph);
     apply_correction(lat, x_matches, DecoderGraph::X);
     apply_correction(lat, z_matches, DecoderGraph::Z);
     return evaluate_logical_errors(lat);
+}
+
+void run_threshold_sweep(const std::vector<int>& distances, const std::vector<double>& probabilities, int num_shots, const std::string& filename) {
+    std::ofstream outfile(filename);
+    if (!outfile.is_open()) {
+        std::cerr << "Error: Could not open " << filename << " for writing.\n";
+        return;
+    }
+    outfile << "d,p,logical_error_rate,total_fails,num_shots\n";
+
+    std::cout << "\n=== Starting Threshold Sweep ===\n";
+    for (int d : distances) {
+        std::cout << "Initializing graphs for d = " << d << "...\n";
+        
+        // Build the graphs ONCE per distance
+        Lattice lat(d);
+        DecoderGraph x_graph(lat, DecoderGraph::X);
+        DecoderGraph z_graph(lat, DecoderGraph::Z);
+
+        for (double p : probabilities) {
+            int total_fails = 0;
+            SimConfig config{d, p, false};
+
+            for (int i = 0; i < num_shots; i++) {
+                LogicalResult res = run_single_simulation(config, lat, x_graph, z_graph);
+                if (!res.success) total_fails++;
+            }
+
+            double p_L = static_cast<double>(total_fails) / num_shots;
+            
+            outfile << d << "," << p << "," << p_L << "," << total_fails << "," << num_shots << "\n";
+            std::cout << "  p = " << std::left << std::setw(6) << p 
+                      << " | p_L = " << p_L 
+                      << " (" << total_fails << "/" << num_shots << ")\n";
+
+            // Early stopping: break if we hit the ~0.75 saturation point
+            if (p_L >= 0.7) {
+                std::cout << "  -> Saturation reached (p_L >= 0.7). Skipping remaining probabilities for d=" << d << ".\n";
+                break;
+            }
+        }
+    }
+    
+    outfile.close();
+    std::cout << "=== Sweep Complete. Data saved to " << filename << " ===\n";
 }
 
 void run_monte_carlo(const SimConfig& config, int num_shots) {
@@ -66,7 +112,7 @@ void run_verbose_simulation(const SimConfig& config) {
     sample_noise(lat, config.p);
     print_noise(lat);
     std::cout << "[syndrome] computing defects...\n";
-    compute_syndrome(lat);
+    compute_syndrome(lat, config);
     print_defects(lat);
 
     std::cout << "[decoder] building X syndrome graph and running mwpm...\n";

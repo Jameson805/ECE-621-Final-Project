@@ -11,6 +11,11 @@ struct Stabilizer {
     int neighbors[MAX_NEIGHBORS];
 };
 
+struct SpaceTimeDefect {
+    int stab_idx;
+    int t;
+};
+
 enum Pauli {
     I = 0,
     X = 1,
@@ -30,8 +35,8 @@ public:
     std::vector<Stabilizer> z_stabilizers;
 
     std::vector<Pauli> errors;
-    std::vector<int> x_defects;
-    std::vector<int> z_defects;
+    std::vector<SpaceTimeDefect> x_defects;
+    std::vector<SpaceTimeDefect> z_defects;
 
     Lattice() = default;
     Lattice(int d);

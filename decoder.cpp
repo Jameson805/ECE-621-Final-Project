@@ -80,7 +80,7 @@ void DecoderGraph::print() const {
     std::cout << "===========================\n";
 }
 
-std::vector<CorrectionMatch> run_mwpm(const std::vector<int>& defects, const DecoderGraph& dec_graph) {
+std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defects, const DecoderGraph& dec_graph) {
     std::vector<CorrectionMatch> results;
     int N = defects.size();
     
@@ -104,14 +104,14 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<int>& defects, const Dec
     }
 
     for (int i = 0; i < N; i++) {
-        int stab_u = defects[i];
+        int stab_u = defects[i].stab_idx;
         lemon::ListGraph::Node dec_u = dec_graph.stab_nodes[stab_u]; 
 
         lemon::Dijkstra<lemon::ListGraph, lemon::ListGraph::EdgeMap<int>> dijkstra(dec_graph.graph(), dec_graph.weights());
         dijkstra.run(dec_u);
 
         for (int j = i + 1; j < N; j++) {
-            int stab_v = defects[j];
+            int stab_v = defects[j].stab_idx;
             lemon::ListGraph::Node dec_v = dec_graph.stab_nodes[stab_v];
             int dist = dijkstra.dist(dec_v);
             auto e = match_graph.addEdge(nodes[i], nodes[j]);
@@ -139,9 +139,9 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<int>& defects, const Dec
         }
 
         if (mate_idx >= N) {
-            results.push_back({defects[i], -1});
+            results.push_back({defects[i].stab_idx, -1});
         } else if (i < mate_idx) {
-            results.push_back({defects[i], defects[mate_idx]});
+            results.push_back({defects[i].stab_idx, defects[mate_idx].stab_idx});
         }
     }
 

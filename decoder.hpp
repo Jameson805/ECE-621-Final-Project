@@ -34,7 +34,7 @@ struct CorrectionMatch {
     int defect_2; // -1 represents a match to the boundary
 };
 
-std::vector<CorrectionMatch> run_mwpm(const std::vector<int>& defects, const DecoderGraph& dec_graph);
+std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defects, const DecoderGraph& dec_graph);
 void print_matches(const std::vector<CorrectionMatch>& matches);
 
 #endif
