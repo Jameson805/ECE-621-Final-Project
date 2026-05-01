@@ -24,8 +24,13 @@ void compute_syndrome(Lattice& lat, const SimConfig& config) {
     std::vector<int> prev_z_syndrome(lat.num_z_stabilizers, 0);
 
     for (int t = 0; t < num_rounds; t++) {
-        // Accumulate physical data errors on the lattice
-        sample_noise(lat, config.p);
+        if (config.verbose) {
+            std::cout << "[noise] sampling noise for p = " << config.p << " at t = " << t << ":\n";
+            sample_noise(lat, config.p);
+            print_noise(lat);
+        } else {
+            sample_noise(lat, config.p);
+        }
 
         // Compute ideal syndromes based on current accumulated errors
         std::vector<int> curr_x_syndrome(lat.num_x_stabilizers, 0);
@@ -47,8 +52,8 @@ void compute_syndrome(Lattice& lat, const SimConfig& config) {
             }
         }
 
-        // Apply measurement noise (skip this on the final perfect round)
-        if (t < lat.d - 1) {
+        // Skip measurement noise on code capacity case and final round of phenomenological case
+        if (config.use_measurement_errors && t < num_rounds - 1) {
             apply_measurement_noise(curr_x_syndrome, config.p);
             apply_measurement_noise(curr_z_syndrome, config.p);
         }

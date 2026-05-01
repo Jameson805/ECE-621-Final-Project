@@ -7,6 +7,7 @@ struct SimConfig {
     int d;
     double p; 
     bool use_measurement_errors;
+    bool verbose = false;
 };
 
 void run_verbose_simulation(const SimConfig& config);

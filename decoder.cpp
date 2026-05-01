@@ -5,18 +5,16 @@
 
 using namespace lemon;
 
-DecoderGraph::DecoderGraph(const Lattice &lat, Type t) : weight(g) {
-    build(lat, t);
+DecoderGraph::DecoderGraph(const Lattice &lat, Type t, int rounds) : type(t), num_rounds(rounds), weight(g) {
+    build(lat);
 }
 
-void DecoderGraph::build(const Lattice &lat, Type t) {
+void DecoderGraph::build(const Lattice &lat) {
     const std::vector<Stabilizer> &stabs =
-        (t == X) ? lat.x_stabilizers : lat.z_stabilizers;
+        (type == X) ? lat.x_stabilizers : lat.z_stabilizers;
 
     const int num_stabs = stabs.size();
     const int num_qubits = lat.num_qubits;
-
-    boundary = g.addNode();
 
     stab_nodes.resize(num_stabs);
     for (int i = 0; i < num_stabs; i++) {
@@ -41,25 +39,13 @@ void DecoderGraph::build(const Lattice &lat, Type t) {
         }
     }
 
-    int edge_count = 0;
-
     for (int q = 0; q < num_qubits; q++) {
         const QubitAdj &a = adj[q];
-
         if (a.count == 2) {
             auto u = stab_nodes[a.stabs[0]];
             auto v = stab_nodes[a.stabs[1]];
-
             auto e = g.addEdge(u, v);
             weight[e] = 1;
-            edge_count++;
-
-        } else if (a.count == 1) {
-            auto u = stab_nodes[a.stabs[0]];
-
-            auto e = g.addEdge(u, boundary);
-            weight[e] = 1;
-            edge_count++;
         }
     }
 }
@@ -80,7 +66,7 @@ void DecoderGraph::print() const {
     std::cout << "===========================\n";
 }
 
-std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defects, const DecoderGraph& dec_graph) {
+std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defects, const DecoderGraph& dec_graph, const Lattice& lat) {
     std::vector<CorrectionMatch> results;
     int N = defects.size();
     
@@ -88,6 +74,8 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defect
 
     lemon::ListGraph match_graph;
     lemon::ListGraph::EdgeMap<int> match_weight(match_graph);
+    
+    // Create 2N nodes: 0 to N-1 are defects, N to 2N-1 are virtual boundaries
     std::vector<lemon::ListGraph::Node> nodes(2 * N);
     for(int i = 0; i < 2 * N; i++) {
         nodes[i] = match_graph.addNode();
@@ -95,7 +83,7 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defect
 
     const int MAX_WEIGHT = 100000; 
 
-    // Uses N dummy boundaries connected with weight 0, so all defects can connect to boundary if needed
+    // Connect all N virtual boundaries to each other with Cost = 0
     for(int i = 0; i < N; i++) {
         for(int j = i + 1; j < N; j++) {
             auto e = match_graph.addEdge(nodes[N + i], nodes[N + j]);
@@ -110,15 +98,23 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defect
         lemon::Dijkstra<lemon::ListGraph, lemon::ListGraph::EdgeMap<int>> dijkstra(dec_graph.graph(), dec_graph.weights());
         dijkstra.run(dec_u);
 
+        // Edges between defects (Cost = physical Dijkstra distance)
         for (int j = i + 1; j < N; j++) {
             int stab_v = defects[j].stab_idx;
             lemon::ListGraph::Node dec_v = dec_graph.stab_nodes[stab_v];
             int dist = dijkstra.dist(dec_v);
+            
             auto e = match_graph.addEdge(nodes[i], nodes[j]);
             match_weight[e] = MAX_WEIGHT - dist; 
         }
 
-        int dist_to_bound = dijkstra.dist(dec_graph.get_boundary());
+        // Edge from defect to its own virtual boundary (Cost = geometric distance, efficient but not modular)
+        const Stabilizer& s = (dec_graph.getType() == DecoderGraph::X) ? lat.x_stabilizers[stab_u] : lat.z_stabilizers[stab_u];
+        
+        int dist_to_bound = (dec_graph.getType() == DecoderGraph::X) 
+                            ? std::min(s.y + 1, lat.d - 1 - s.y) 
+                            : std::min(s.x + 1, lat.d - 1 - s.x);
+
         auto e = match_graph.addEdge(nodes[i], nodes[N + i]);
         match_weight[e] = MAX_WEIGHT - dist_to_bound;
     }
@@ -138,6 +134,7 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defect
             }
         }
 
+        // If a defect mated with ANY virtual boundary (index >= N), it routes to boundary
         if (mate_idx >= N) {
             results.push_back({defects[i].stab_idx, -1});
         } else if (i < mate_idx) {

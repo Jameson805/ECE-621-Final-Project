@@ -43,8 +43,8 @@ static void route_to_boundary(Lattice& lat, const Stabilizer& start, DecoderGrap
     int curr_x = start.x;
     int curr_y = start.y;
 
-    if (type == DecoderGraph::Z) {
-        // Z defects route to top (y=-1) or bottom (y=d-1)
+    if (type == DecoderGraph::X) {
+        // X defects route to top (y=-1) or bottom (y=d-1)
         int target_y = (std::abs(curr_y - (-1)) <= std::abs(curr_y - (lat.d - 1))) ? -1 : (lat.d - 1);
         
         while (curr_y != target_y) {
@@ -59,7 +59,7 @@ static void route_to_boundary(Lattice& lat, const Stabilizer& start, DecoderGrap
             curr_y = next_y;
         }
     } else {
-        // X defects route to left (x=-1) or right (x=d-1)
+        // Z defects route to left (x=-1) or right (x=d-1)
         int target_x = (std::abs(curr_x - (-1)) <= std::abs(curr_x - (lat.d - 1))) ? -1 : (lat.d - 1);
         
         while (curr_x != target_x) {
