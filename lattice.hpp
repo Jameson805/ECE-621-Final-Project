@@ -39,6 +39,11 @@ public:
     std::vector<SpaceTimeDefect> x_defects;
     std::vector<SpaceTimeDefect> z_defects;
 
+    std::vector<int> curr_x_syndrome;
+    std::vector<int> curr_z_syndrome;
+    std::vector<int> prev_x_syndrome;
+    std::vector<int> prev_z_syndrome;
+
     Lattice() = default;
     Lattice(int d);
     void build(int d);
@@ -50,7 +55,13 @@ public:
     }
 };
 
-int qubit_index(int d, int x, int y);
-void qubit_coords(int d, int index, int &x, int &y);
+inline constexpr int qubit_index(int d, int x, int y) {
+    return d * y + x;
+}
+
+inline constexpr void qubit_coords(int d, int index, int &x, int &y) {
+    x = index % d;
+    y = index / d;
+}
 
 #endif

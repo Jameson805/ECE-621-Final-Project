@@ -19,13 +19,21 @@ public:
     Type getType() const { return type; }
     int getNumRounds() const { return num_rounds; }
 
+    int get_distance(int u, int v) const {
+        return dist_matrix[u * total_nodes + v];
+    }
+
     std::vector<lemon::ListGraph::Node> stab_nodes;
 
 private:
     Type type;
     int num_rounds;
+    int total_nodes;
     lemon::ListGraph g;
     lemon::ListGraph::EdgeMap<int> weight;
+
+    // Precomputed distance matrix for all pairs of nodes in the decoder graph, HUGE speedup for MWPM
+    std::vector<int> dist_matrix;
 };
 
 struct CorrectionMatch {

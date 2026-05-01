@@ -10,11 +10,10 @@ void compute_syndrome(Lattice& lat, const SimConfig& config) {
     lat.x_defects.clear();
     lat.z_defects.clear();
 
-    // 0.0 ratio = Code Capacity (1 round), otherwise Phenomenological (d rounds)
     int num_rounds = (config.p_meas_ratio > 0.0) ? lat.d : 1;
 
-    std::vector<int> prev_x_syndrome(lat.num_x_stabilizers, 0);
-    std::vector<int> prev_z_syndrome(lat.num_z_stabilizers, 0);
+    std::fill(lat.prev_x_syndrome.begin(), lat.prev_x_syndrome.end(), 0);
+    std::fill(lat.prev_z_syndrome.begin(), lat.prev_z_syndrome.end(), 0);
 
     for (int t = 0; t < num_rounds; t++) {
         sample_physical_noise(lat, config);
@@ -24,45 +23,51 @@ void compute_syndrome(Lattice& lat, const SimConfig& config) {
             print_noise(lat);
         }
 
-        std::vector<int> curr_x_syndrome(lat.num_x_stabilizers, 0);
-        std::vector<int> curr_z_syndrome(lat.num_z_stabilizers, 0);
+        std::fill(lat.curr_x_syndrome.begin(), lat.curr_x_syndrome.end(), 0);
+        std::fill(lat.curr_z_syndrome.begin(), lat.curr_z_syndrome.end(), 0);
 
-        // X-Stabilizers detect Z and Y errors
+        // Shoutout to Gemini for this branchless syndrome calculation using the bitwise Pauli representation
+        // Don't fully get it but confirmed it works and it's very fast, so leaving it as is
+        // X-Stabilizers detect Z and Y errors (the 2s bit)
         for (int i = 0; i < lat.num_x_stabilizers; i++) {
-            for (int j = 0; j < lat.x_stabilizers[i].degree; j++) {
-                Pauli error = lat.errors[lat.x_stabilizers[i].neighbors[j]];
-                if (error == Z || error == Y) curr_x_syndrome[i] ^= 1;
+            int parity = 0;
+            const auto& stab = lat.x_stabilizers[i];
+            for (int j = 0; j < stab.degree; j++) {
+                parity ^= lat.errors[stab.neighbors[j]];
             }
+            lat.curr_x_syndrome[i] = (parity >> 1) & 1;
         }
 
-        // Z-Stabilizers detect X and Y errors
+        // Z-Stabilizers detect X and Y errors (the 1s bit)
         for (int i = 0; i < lat.num_z_stabilizers; i++) {
-            for (int j = 0; j < lat.z_stabilizers[i].degree; j++) {
-                Pauli error = lat.errors[lat.z_stabilizers[i].neighbors[j]];
-                if (error == X || error == Y) curr_z_syndrome[i] ^= 1;
+            int parity = 0;
+            const auto& stab = lat.z_stabilizers[i];
+            for (int j = 0; j < stab.degree; j++) {
+                parity ^= lat.errors[stab.neighbors[j]];
             }
+            lat.curr_z_syndrome[i] = parity & 1;
         }
 
-        // Apply measurement noise to all but the final 'perfect' round
+        // Apply measurement noise
         if (config.p_meas_ratio > 0.0 && t < num_rounds - 1) {
-            sample_measurement_noise(curr_x_syndrome, config);
-            sample_measurement_noise(curr_z_syndrome, config);
+            sample_measurement_noise(lat.curr_x_syndrome, config);
+            sample_measurement_noise(lat.curr_z_syndrome, config);
         }
 
         // Compare current syndrome to previous round to find Defects
         for (int i = 0; i < lat.num_x_stabilizers; i++) {
-            if (curr_x_syndrome[i] != prev_x_syndrome[i]) {
+            if (lat.curr_x_syndrome[i] != lat.prev_x_syndrome[i]) {
                 lat.x_defects.push_back({i, t});
             }
         }
         for (int i = 0; i < lat.num_z_stabilizers; i++) {
-            if (curr_z_syndrome[i] != prev_z_syndrome[i]) {
+            if (lat.curr_z_syndrome[i] != lat.prev_z_syndrome[i]) {
                 lat.z_defects.push_back({i, t});
             }
         }
 
-        prev_x_syndrome = curr_x_syndrome;
-        prev_z_syndrome = curr_z_syndrome;
+        std::swap(lat.prev_x_syndrome, lat.curr_x_syndrome);
+        std::swap(lat.prev_z_syndrome, lat.curr_z_syndrome);
     }
 }
 

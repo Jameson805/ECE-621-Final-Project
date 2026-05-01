@@ -64,6 +64,16 @@ void DecoderGraph::build(const Lattice &lat, int s_weight, int t_weight) {
             }
         }
     }
+    total_nodes = num_rounds * num_stabs;
+    dist_matrix.assign(total_nodes * total_nodes, 0);
+
+    for (int i = 0; i < total_nodes; i++) {
+        lemon::Dijkstra<lemon::ListGraph, lemon::ListGraph::EdgeMap<int>> dijkstra(g, weight);
+        dijkstra.run(stab_nodes[i]);
+        for (int j = 0; j < total_nodes; j++) {
+            dist_matrix[i * total_nodes + j] = dijkstra.dist(stab_nodes[j]);
+        }
+    }
 }
 
 void DecoderGraph::print() const {
@@ -111,17 +121,15 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defect
         int stab_u = defects[i].stab_idx;
         int t_u = defects[i].t; 
         
-        lemon::ListGraph::Node dec_u = dec_graph.stab_nodes[t_u * num_stabs + stab_u]; 
-        lemon::Dijkstra<lemon::ListGraph, lemon::ListGraph::EdgeMap<int>> dijkstra(dec_graph.graph(), dec_graph.weights());
-        dijkstra.run(dec_u);
+        int dec_u_idx = t_u * num_stabs + stab_u; 
 
-        // Edges between defects (Cost = physical space-time Dijkstra distance)
+        // Edges between defects (Cost = precomputed physical space-time Dijkstra distance)
         for (int j = i + 1; j < N; j++) {
             int stab_v = defects[j].stab_idx;
             int t_v = defects[j].t;
             
-            lemon::ListGraph::Node dec_v = dec_graph.stab_nodes[t_v * num_stabs + stab_v];
-            int dist = dijkstra.dist(dec_v);
+            int dec_v_idx = t_v * num_stabs + stab_v;
+            int dist = dec_graph.get_distance(dec_u_idx, dec_v_idx);
             
             auto e = match_graph.addEdge(nodes[i], nodes[j]);
             match_weight[e] = MAX_WEIGHT - dist; 

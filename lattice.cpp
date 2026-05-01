@@ -15,6 +15,11 @@ void Lattice::build(int d) {
     x_stabilizers.resize(num_x_stabilizers);
     z_stabilizers.resize(num_z_stabilizers);
 
+    curr_x_syndrome.assign(num_x_stabilizers, 0);
+    curr_z_syndrome.assign(num_z_stabilizers, 0);
+    prev_x_syndrome.assign(num_x_stabilizers, 0);
+    prev_z_syndrome.assign(num_z_stabilizers, 0);
+
     errors.assign(num_qubits, Pauli::I);
     x_defects.clear();
     z_defects.clear();
@@ -94,15 +99,6 @@ void Lattice::build(int d) {
             x_stabilizers[x_idx++] = stab;
         }
     }
-}
-
-int qubit_index(int d, int x, int y) {
-    return d * y + x;
-}
-
-void qubit_coords(int d, int index, int &x, int &y) {
-    x = index % d;
-    y = index / d;
 }
 
 static void print_stabilizer(

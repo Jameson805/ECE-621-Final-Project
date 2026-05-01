@@ -34,40 +34,21 @@ void run_full_experiment(const std::vector<int>& distances, const std::vector<do
 
 int main() {
     std::vector<int> distances = {
-        3, 5, 7, 9, 11, 13
+        3, 5, 7, 9, 11, 13, 15, 17
     };
+
     std::vector<double> probabilities = {
-        0.005, 0.008, 0.012, 0.018, 0.028, 
-        0.042, 0.065, 0.090, 0.110, 0.130, 
-        0.150, 0.170, 0.190, 0.220, 0.260, 
-        0.300
+        0.0005, 0.0007, 0.0010, 0.0014, 0.0020, 
+        0.0028, 0.0040, 0.0056, 0.0080, 0.0110, 
+        0.0160, 0.0220, 0.0310, 0.0440, 0.0630, 
+        0.0880, 0.1250, 0.1760, 0.2500, 0.3500, 
+        0.5000
     };
-    int shots = 500;
+
+    int shots = 250;
 
     run_full_experiment(distances, probabilities, shots);
 
     return 0;
-
-    /*
-    std::vector<int> distances = {
-        3, 5, 7, 9, 11, 13, 15, 17
-    };
-    
-    std::vector<double> probabilities = {
-        0.005, 0.008, 0.012, 0.018, 0.028, 
-        0.042, 0.065, 0.090, 0.110, 0.130, 
-        0.150, 0.170, 0.190, 0.220, 0.260, 
-        0.300
-    };
-    
-    int shots = 1000;
-
-    // Run 2D Code Capacity
-    // run_threshold_sweep(distances, probabilities, shots, NoiseModel::DEPOLARIZING, 0.0, 10.0);
-
-    // Run 3D Phenomenological
-    run_threshold_sweep(distances, probabilities, shots, NoiseModel::DEPOLARIZING, 1.0, 10.0);
-
-    return 0;
-    */
 }
+

@@ -25,6 +25,10 @@ LogicalResult run_single_simulation(const SimConfig& config, Lattice& lat, const
 }
 
 void run_threshold_sweep(const std::vector<int>& distances, const std::vector<double>& probabilities, int num_shots, NoiseModel noise_model, double p_meas_ratio, double bias_eta = 100.0) {
+    // NEW: Set dynamic saturation bounds based on asymptotic limits
+    // Unbiased approaches 0.75, Biased approaches 0.50
+    double saturation_bound = (noise_model == NoiseModel::BIASED) ? 0.48 : 0.65;
+
     std::ostringstream filename_stream;
     filename_stream << "results/sweep_";
     if (noise_model == NoiseModel::INDEPENDENT) filename_stream << "ind";
@@ -106,8 +110,8 @@ void run_threshold_sweep(const std::vector<int>& distances, const std::vector<do
                       << " | p_L = " << p_L 
                       << " (" << total_fails << "/" << num_shots << ")\n";
 
-            if (p_L >= 0.66) {
-                std::cout << "  -> Saturation reached. Skipping remaining probabilities.\n";
+            if (p_L >= saturation_bound) {
+                std::cout << "  -> Saturation reached (" << p_L << " >= " << saturation_bound << "). Skipping remaining probabilities.\n";
                 break;
             }
         }

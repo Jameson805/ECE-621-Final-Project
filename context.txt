@@ -1,0 +1,1358 @@
+./Makefile
+---
+CXX = g++
+
+CXXFLAGS = -Wall -Wextra -std=c++17 -O3 -pthread
+LIBS = -lstdc++fs
+
+TARGET = sim
+
+SRCS = main.cpp simulate.cpp lattice.cpp noise.cpp syndrome.cpp decoder.cpp correction.cpp logical.cpp
+OBJS = $(SRCS:.cpp=.o)
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LIBS)
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OBJS) $(TARGET)
+
+
+---
+./context.txt
+---
+./Makefile
+---
+CXX = g++
+
+CXXFLAGS = -Wall -Wextra -std=c++17 -O3 -pthread
+LIBS = -lstdc++fs
+
+TARGET = sim
+
+SRCS = main.cpp simulate.cpp lattice.cpp noise.cpp syndrome.cpp decoder.cpp correction.cpp logical.cpp
+OBJS = $(SRCS:.cpp=.o)
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LIBS)
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OBJS) $(TARGET)
+
+
+---
+
+
+---
+./correction.cpp
+---
+#include "correction.hpp"
+#include <iostream>
+#include <cmath>
+#include <algorithm>
+
+static void apply_pauli(Lattice& lat, int q, Pauli p) {
+    if (p == Pauli::I) return;
+    lat.errors[q] = static_cast<Pauli>(lat.errors[q] ^ p);
+}
+
+static void route_manhattan(Lattice& lat, const Stabilizer& s1, const Stabilizer& s2, Pauli p) {
+    int curr_x = s1.x;
+    int curr_y = s1.y;
+    int target_x = s2.x;
+    int target_y = s2.y;
+
+    while (curr_x != target_x || curr_y != target_y) {
+        int next_x = curr_x;
+        int next_y = curr_y;
+
+        if (curr_x != target_x && curr_y != target_y) {
+            next_x += (target_x > curr_x) ? 1 : -1;
+            next_y += (target_y > curr_y) ? 1 : -1;
+        } else if (curr_x != target_x) {
+            next_x += (target_x > curr_x) ? 1 : -1;
+            next_y += (curr_y + 1 < lat.d) ? 1 : -1; 
+        } else if (curr_y != target_y) {
+            next_y += (target_y > curr_y) ? 1 : -1;
+            next_x += (curr_x + 1 < lat.d) ? 1 : -1;
+        }
+
+        int q_x = std::max(curr_x, next_x);
+        int q_y = std::max(curr_y, next_y);
+        apply_pauli(lat, qubit_index(lat.d, q_x, q_y), p);
+
+        curr_x = next_x;
+        curr_y = next_y;
+    }
+}
+
+static void route_to_boundary(Lattice& lat, const Stabilizer& start, DecoderGraph::Type type, Pauli p) {
+    int curr_x = start.x;
+    int curr_y = start.y;
+
+    if (type == DecoderGraph::X) {
+        // X defects route to top (y=-1) or bottom (y=d-1)
+        int target_y = (std::abs(curr_y - (-1)) <= std::abs(curr_y - (lat.d - 1))) ? -1 : (lat.d - 1);
+        
+        while (curr_y != target_y) {
+            int next_y = curr_y + ((target_y > curr_y) ? 1 : -1);
+            int next_x = curr_x + ((curr_x + 1 < lat.d) ? 1 : -1); // zig-zag in X
+            
+            int q_x = std::max(curr_x, next_x);
+            int q_y = std::max(curr_y, next_y);
+            apply_pauli(lat, qubit_index(lat.d, q_x, q_y), p);
+            
+            curr_x = next_x;
+            curr_y = next_y;
+        }
+    } else {
+        // Z defects route to left (x=-1) or right (x=d-1)
+        int target_x = (std::abs(curr_x - (-1)) <= std::abs(curr_x - (lat.d - 1))) ? -1 : (lat.d - 1);
+        
+        while (curr_x != target_x) {
+            int next_x = curr_x + ((target_x > curr_x) ? 1 : -1);
+            int next_y = curr_y + ((curr_y + 1 < lat.d) ? 1 : -1); // zig-zag in Y
+            
+            int q_x = std::max(curr_x, next_x);
+            int q_y = std::max(curr_y, next_y);
+            apply_pauli(lat, qubit_index(lat.d, q_x, q_y), p);
+            
+            curr_x = next_x;
+            curr_y = next_y;
+        }
+    }
+}
+
+void apply_correction(Lattice& lat, const std::vector<CorrectionMatch>& matches, DecoderGraph::Type type) {
+    Pauli correction_pauli = (type == DecoderGraph::Z) ? Pauli::X : Pauli::Z;
+    const std::vector<Stabilizer>& stabs = (type == DecoderGraph::X) ? lat.x_stabilizers : lat.z_stabilizers;
+
+    for (const auto& match : matches) {
+        if (match.defect_2 == -1) {
+            // Route to spatial boundary
+            route_to_boundary(lat, stabs[match.defect_1], type, correction_pauli);
+        } else {
+            if (match.defect_1 == match.defect_2) continue; 
+            // Route spatial defect to spatial defect
+            route_manhattan(lat, stabs[match.defect_1], stabs[match.defect_2], correction_pauli);
+        }
+    }
+}
+
+
+---
+./correction.hpp
+---
+#ifndef CORRECTION_HPP
+#define CORRECTION_HPP
+
+#include "lattice.hpp"
+#include "decoder.hpp"
+#include <vector>
+
+void apply_correction(Lattice& lat, const std::vector<CorrectionMatch>& matches, DecoderGraph::Type type);
+
+#endif
+
+
+---
+./decoder.cpp
+---
+#include "decoder.hpp"
+#include <lemon/dijkstra.h> 
+#include <lemon/matching.h>
+#include <iostream>
+#include <algorithm>
+
+using namespace lemon;
+
+DecoderGraph::DecoderGraph(const Lattice &lat, Type t, int rounds, int s_weight, int t_weight) : type(t), num_rounds(rounds), weight(g) {
+    build(lat, s_weight, t_weight);
+}
+
+void DecoderGraph::build(const Lattice &lat, int s_weight, int t_weight) {
+    const std::vector<Stabilizer> &stabs = (type == X) ? lat.x_stabilizers : lat.z_stabilizers;
+
+    const int num_stabs = stabs.size();
+    const int num_qubits = lat.num_qubits;
+
+    stab_nodes.clear();
+    stab_nodes.resize(num_rounds * num_stabs);
+
+    for (int t = 0; t < num_rounds; t++) {
+        for (int i = 0; i < num_stabs; i++) {
+            stab_nodes[t * num_stabs + i] = g.addNode();
+        }
+    }
+
+    struct QubitAdj {
+        int count = 0;
+        int stabs[2];
+    };
+
+    std::vector<QubitAdj> adj(num_qubits);
+    for (int s = 0; s < num_stabs; s++) {
+        const Stabilizer &stab = stabs[s];
+
+        for (int j = 0; j < stab.degree; j++) {
+            int q = stab.neighbors[j];
+            if (adj[q].count < 2) {
+                adj[q].stabs[adj[q].count++] = s;
+            }
+        }
+    }
+
+    for (int t = 0; t < num_rounds; t++) {
+        // 1. Spatial Edges (Data Errors)
+        for (int q = 0; q < num_qubits; q++) {
+            const QubitAdj &a = adj[q];
+            if (a.count == 2) {
+                auto u = stab_nodes[t * num_stabs + a.stabs[0]];
+                auto v = stab_nodes[t * num_stabs + a.stabs[1]];
+                auto e = g.addEdge(u, v);
+                weight[e] = s_weight;
+            }
+        }
+
+        // 2. Temporal Edges (Measurement Errors)
+        if (t < num_rounds - 1) {
+            for (int s = 0; s < num_stabs; s++) {
+                auto u = stab_nodes[t * num_stabs + s];
+                auto v = stab_nodes[(t + 1) * num_stabs + s];
+                auto e = g.addEdge(u, v);
+                weight[e] = t_weight;
+            }
+        }
+    }
+}
+
+void DecoderGraph::print() const {
+    std::cout << "\n=== LEMON Decoder Graph ===\n";
+
+    for (ListGraph::EdgeIt e(g); e != INVALID; ++e) {
+        auto u = g.u(e);
+        auto v = g.v(e);
+
+        std::cout << g.id(u) << " <--> " << g.id(v) << " (w=" << weight[e] << ")\n";
+    }
+
+    std::cout << "===========================\n";
+}
+
+std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defects, const DecoderGraph& dec_graph, const Lattice& lat) {
+    std::vector<CorrectionMatch> results;
+    int N = defects.size();
+    
+    if (N == 0) return results;
+
+    lemon::ListGraph match_graph;
+    lemon::ListGraph::EdgeMap<int> match_weight(match_graph);
+    
+    // Create 2N nodes: 0 to N-1 are defects, N to 2N-1 are virtual boundaries
+    std::vector<lemon::ListGraph::Node> nodes(2 * N);
+    for(int i = 0; i < 2 * N; i++) {
+        nodes[i] = match_graph.addNode();
+    }
+
+    const int MAX_WEIGHT = 100000; 
+
+    // Connect all N virtual boundaries to each other with Cost = 0
+    for(int i = 0; i < N; i++) {
+        for(int j = i + 1; j < N; j++) {
+            auto e = match_graph.addEdge(nodes[N + i], nodes[N + j]);
+            match_weight[e] = MAX_WEIGHT; 
+        }
+    }
+
+    DecoderGraph::Type type = dec_graph.getType();
+    int num_stabs = (type == DecoderGraph::X) ? lat.num_x_stabilizers : lat.num_z_stabilizers;
+
+    for (int i = 0; i < N; i++) {
+        int stab_u = defects[i].stab_idx;
+        int t_u = defects[i].t; 
+        
+        lemon::ListGraph::Node dec_u = dec_graph.stab_nodes[t_u * num_stabs + stab_u]; 
+        lemon::Dijkstra<lemon::ListGraph, lemon::ListGraph::EdgeMap<int>> dijkstra(dec_graph.graph(), dec_graph.weights());
+        dijkstra.run(dec_u);
+
+        // Edges between defects (Cost = physical space-time Dijkstra distance)
+        for (int j = i + 1; j < N; j++) {
+            int stab_v = defects[j].stab_idx;
+            int t_v = defects[j].t;
+            
+            lemon::ListGraph::Node dec_v = dec_graph.stab_nodes[t_v * num_stabs + stab_v];
+            int dist = dijkstra.dist(dec_v);
+            
+            auto e = match_graph.addEdge(nodes[i], nodes[j]);
+            match_weight[e] = MAX_WEIGHT - dist; 
+        }
+
+        // Edge from defect to its own virtual spatial boundary 
+        const Stabilizer& s = (type == DecoderGraph::X) ? lat.x_stabilizers[stab_u] : lat.z_stabilizers[stab_u];
+        
+        int dist_to_bound = (type == DecoderGraph::X) 
+                            ? std::min(s.y + 1, lat.d - 1 - s.y) 
+                            : std::min(s.x + 1, lat.d - 1 - s.x);
+
+        auto e = match_graph.addEdge(nodes[i], nodes[N + i]);
+        match_weight[e] = MAX_WEIGHT - dist_to_bound;
+    }
+
+    lemon::MaxWeightedPerfectMatching<lemon::ListGraph, lemon::ListGraph::EdgeMap<int>> mwpm(match_graph, match_weight);
+    mwpm.run();
+
+    for(int i = 0; i < N; i++) {
+        lemon::ListGraph::Node u = nodes[i];
+        lemon::ListGraph::Node mate = mwpm.mate(u);
+        int mate_idx = -1;
+        for(int j = 0; j < 2 * N; j++) {
+            if (nodes[j] == mate) {
+                mate_idx = j;
+                break;
+            }
+        }
+
+        // Because we only push `stab_idx`, 3D temporal pairs are naturally projected to 2D
+        if (mate_idx >= N) {
+            results.push_back({defects[i].stab_idx, -1});
+        } else if (i < mate_idx) {
+            results.push_back({defects[i].stab_idx, defects[mate_idx].stab_idx});
+        }
+    }
+
+    return results;
+}
+
+void print_matches(const std::vector<CorrectionMatch>& matches) {
+    std::cout << "\n=== Correction Pairs ===\n";
+    if (matches.empty()) {
+        std::cout << "No defects to match. Trivial success.\n";
+    }
+    
+    for (const auto& match : matches) {
+        if (match.defect_2 == -1) {
+            std::cout << "Defect " << match.defect_1 << " <--> Boundary\n";
+        } else {
+            std::cout << "Defect " << match.defect_1 << " <--> Defect " << match.defect_2 << "\n";
+        }
+    }
+    std::cout << "========================\n";
+}
+
+
+---
+./decoder.hpp
+---
+#ifndef DECODER_HPP
+#define DECODER_HPP
+
+#include "lattice.hpp"
+#include <lemon/list_graph.h>
+#include <vector>
+
+class DecoderGraph {
+public:
+    enum Type { X, Z };
+
+    DecoderGraph(const Lattice &lat, Type t, int num_rounds = 1, int s_weight = 1, int t_weight = 1);
+
+    void build(const Lattice &lat, int s_weight, int t_weight);
+    void print() const;
+
+    const lemon::ListGraph& graph() const { return g; }
+    const lemon::ListGraph::EdgeMap<int>& weights() const { return weight; }
+    Type getType() const { return type; }
+    int getNumRounds() const { return num_rounds; }
+
+    std::vector<lemon::ListGraph::Node> stab_nodes;
+
+private:
+    Type type;
+    int num_rounds;
+    lemon::ListGraph g;
+    lemon::ListGraph::EdgeMap<int> weight;
+};
+
+struct CorrectionMatch {
+    int defect_1;
+    int defect_2; // -1 represents a match to the boundary
+};
+
+std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defects, const DecoderGraph& dec_graph, const Lattice& lat);
+void print_matches(const std::vector<CorrectionMatch>& matches);
+
+#endif
+
+
+---
+./lattice.cpp
+---
+#include <iostream>
+#include "lattice.hpp"
+
+Lattice::Lattice(int d) {
+    build(d);
+}
+
+void Lattice::build(int d) {
+    this->d = d;
+    num_qubits = d * d;
+
+    num_x_stabilizers = (d * d - 1) / 2;
+    num_z_stabilizers = (d * d - 1) / 2;
+
+    x_stabilizers.resize(num_x_stabilizers);
+    z_stabilizers.resize(num_z_stabilizers);
+
+    errors.assign(num_qubits, Pauli::I);
+    x_defects.clear();
+    z_defects.clear();
+
+    int x_idx = 0;
+    int z_idx = 0;
+
+    // Central stabilizers
+    for (int x = 0; x < d - 1; x++) {
+        for (int y = 0; y < d - 1; y++) {
+
+            Stabilizer stab;
+            stab.x = x;
+            stab.y = y;
+            stab.degree = 4;
+
+            stab.neighbors[0] = qubit_index(d, x, y);
+            stab.neighbors[1] = qubit_index(d, x+1, y);
+            stab.neighbors[2] = qubit_index(d, x, y+1);
+            stab.neighbors[3] = qubit_index(d, x+1, y+1);
+
+            if ((x + y) % 2 == 0)
+                x_stabilizers[x_idx++] = stab;
+            else
+                z_stabilizers[z_idx++] = stab;
+        }
+    }
+
+    // Border stabilizers
+    for (int i = 0; i < d - 1; i++) {
+
+        if (i % 2 == 0) {
+            Stabilizer stab;
+            stab.x = i;
+            stab.y = -1;
+            stab.degree = 2;
+
+            stab.neighbors[0] = qubit_index(d, i, 0);
+            stab.neighbors[1] = qubit_index(d, i+1, 0);
+
+            z_stabilizers[z_idx++] = stab;
+        }
+
+        if (((i + (d-1)) % 2) == 1) {
+            Stabilizer stab;
+            stab.x = i;
+            stab.y = d-1;
+            stab.degree = 2;
+
+            stab.neighbors[0] = qubit_index(d, i, d-1);
+            stab.neighbors[1] = qubit_index(d, i+1, d-1);
+
+            z_stabilizers[z_idx++] = stab;
+        }
+
+        if (i % 2 == 1) {
+            Stabilizer stab;
+            stab.x = -1;
+            stab.y = i;
+            stab.degree = 2;
+
+            stab.neighbors[0] = qubit_index(d, 0, i);
+            stab.neighbors[1] = qubit_index(d, 0, i+1);
+
+            x_stabilizers[x_idx++] = stab;
+        }
+
+        if (((d-1 + i) % 2) == 0) {
+            Stabilizer stab;
+            stab.x = d-1;
+            stab.y = i;
+            stab.degree = 2;
+
+            stab.neighbors[0] = qubit_index(d, d-1, i);
+            stab.neighbors[1] = qubit_index(d, d-1, i+1);
+
+            x_stabilizers[x_idx++] = stab;
+        }
+    }
+}
+
+int qubit_index(int d, int x, int y) {
+    return d * y + x;
+}
+
+void qubit_coords(int d, int index, int &x, int &y) {
+    x = index % d;
+    y = index / d;
+}
+
+static void print_stabilizer(
+    const Lattice &lat,
+    const Stabilizer &s,
+    const char type,
+    int idx
+) {
+    std::cout << type << "[" << idx << "] ("
+              << s.x << "," << s.y << "), deg=" << s.degree
+              << " : ";
+
+    for (int j = 0; j < s.degree; j++) {
+        int q = s.neighbors[j];
+        int x, y;
+        qubit_coords(lat.d, q, x, y);
+
+        std::cout << q << "=(" << x << "," << y << ")";
+
+        if (j + 1 < s.degree)
+            std::cout << " | ";
+    }
+
+    std::cout << "\n";
+}
+
+void Lattice::print() const {
+    std::cout << "\n========== LATTICE d=" << d << " ==========\n";
+    std::cout << "Qubits: " << num_qubits << "\n";
+    std::cout << "X stabilizers: " << num_x_stabilizers << "\n";
+    std::cout << "Z stabilizers: " << num_z_stabilizers << "\n\n";
+
+    std::cout << "---- X stabilizers ----\n";
+    for (int i = 0; i < num_x_stabilizers; i++) {
+        print_stabilizer(*this, x_stabilizers[i], 'X', i);
+    }
+
+    std::cout << "\n---- Z stabilizers ----\n";
+    for (int i = 0; i < num_z_stabilizers; i++) {
+        print_stabilizer(*this, z_stabilizers[i], 'Z', i);
+    }
+
+    std::cout << "=====================================\n";
+}
+
+
+---
+./lattice.hpp
+---
+#ifndef LATTICE_HPP
+#define LATTICE_HPP
+
+#include <vector>
+
+#define MAX_NEIGHBORS 4
+
+struct Stabilizer {
+    int x, y;
+    int degree;
+    int neighbors[MAX_NEIGHBORS];
+};
+
+struct SpaceTimeDefect {
+    int stab_idx;
+    int t;
+};
+
+// Allows bitwise XOR for easy Pauli multiplication
+enum Pauli {
+    I = 0,
+    X = 1,
+    Z = 2,
+    Y = 3
+};
+
+class Lattice {
+public:
+    int d;
+    int num_qubits;
+
+    int num_x_stabilizers;
+    int num_z_stabilizers;
+
+    std::vector<Stabilizer> x_stabilizers;
+    std::vector<Stabilizer> z_stabilizers;
+
+    std::vector<Pauli> errors;
+    std::vector<SpaceTimeDefect> x_defects;
+    std::vector<SpaceTimeDefect> z_defects;
+
+    Lattice() = default;
+    Lattice(int d);
+    void build(int d);
+    void print() const;
+    void reset() {
+        std::fill(errors.begin(), errors.end(), Pauli::I);
+        x_defects.clear();
+        z_defects.clear();
+    }
+};
+
+int qubit_index(int d, int x, int y);
+void qubit_coords(int d, int index, int &x, int &y);
+
+#endif
+
+
+---
+./logical.cpp
+---
+#include "logical.hpp"
+#include <iostream>
+
+bool check_logical_z_error(const Lattice& lat) {
+    int z_count = 0;
+    
+    for (int x = 0; x < lat.d; x++) {
+        int q = qubit_index(lat.d, x, 0);
+        if (lat.errors[q] == Pauli::Z || lat.errors[q] == Pauli::Y) {
+            z_count++;
+        }
+    }
+    return (z_count % 2 != 0);
+}
+
+bool check_logical_x_error(const Lattice& lat) {
+    int x_count = 0;
+    
+    for (int y = 0; y < lat.d; y++) {
+        int q = qubit_index(lat.d, 0, y);
+        if (lat.errors[q] == Pauli::X || lat.errors[q] == Pauli::Y) {
+            x_count++;
+        }
+    }
+
+    return (x_count % 2 != 0);
+}
+
+LogicalResult evaluate_logical_errors(const Lattice& lat) {
+    LogicalResult res;
+    res.logical_z_error = check_logical_z_error(lat);
+    res.logical_x_error = check_logical_x_error(lat);
+    res.success = !(res.logical_z_error || res.logical_x_error);
+    
+    return res;
+}
+
+void print_logical_results(const LogicalResult& result) {
+    std::cout << "\n=== Logical Verification ===\n";
+    std::cout << "Logical Z Error: " << (result.logical_z_error ? "FAIL (Detected)" : "SUCCESS (None)") << "\n";
+    std::cout << "Logical X Error: " << (result.logical_x_error ? "FAIL (Detected)" : "SUCCESS (None)") << "\n";
+    std::cout << "Overall Status : " << (!result.success ? "LOGICAL FAILURE" : "DECODING SUCCESS") << "\n";
+    std::cout << "============================\n";
+}
+
+
+---
+./logical.hpp
+---
+#ifndef LOGICAL_HPP
+#define LOGICAL_HPP
+
+#include "lattice.hpp"
+
+struct LogicalResult {
+    bool logical_z_error;
+    bool logical_x_error;
+    bool success; 
+};
+
+bool check_logical_z_error(const Lattice& lat);
+bool check_logical_x_error(const Lattice& lat);
+LogicalResult evaluate_logical_errors(const Lattice& lat);
+void print_logical_results(const LogicalResult& result);
+
+#endif
+
+
+---
+./main.cpp
+---
+#include <iostream>
+#include <vector>
+#include <experimental/filesystem>
+#include "simulate.hpp"
+
+void run_full_experiment(const std::vector<int>& distances, const std::vector<double>& probabilities, int shots) {
+    std::string dir_path = "results";
+    if (std::experimental::filesystem::exists(dir_path)) {
+        std::cout << "Purging old results directory...\n";
+        std::experimental::filesystem::remove_all(dir_path);
+    }
+    std::experimental::filesystem::create_directory(dir_path);
+
+    // Define the 4 measurement error ratios:
+    // 0.0 = Code Capacity (2D baseline)
+    // 0.1 = Good Readout (Meas errors 10x lower than gate errors)
+    // 1.0 = Isotropic (Equal gate and measurement errors)
+    // 10.0 = Bad Readout (Meas errors 10x higher than gate errors)
+    std::vector<double> ratios = {0.0, 0.1, 1.0, 10.0};
+
+    std::cout << "\nCommencing 12-condition surface code simulation suite...\n";
+
+    for (double ratio : ratios) {
+        std::cout << "\n======================================================\n";
+        std::cout << " RUNNING EXPERIMENT BLOCK | MEASUREMENT RATIO: " << ratio;
+        std::cout << "\n======================================================\n";
+
+        run_threshold_sweep(distances, probabilities, shots, NoiseModel::INDEPENDENT, ratio, 10.0);
+        run_threshold_sweep(distances, probabilities, shots, NoiseModel::DEPOLARIZING, ratio, 10.0);
+        run_threshold_sweep(distances, probabilities, shots, NoiseModel::BIASED, ratio, 10.0);
+    }
+        std::cout << "\nSimulation suite finished successfully!\n";
+}
+
+int main() {
+    std::vector<int> distances = {
+        3, 5, 7, 9, 11, 13
+    };
+    std::vector<double> probabilities = {
+        0.005, 0.008, 0.012, 0.018, 0.028, 
+        0.042, 0.065, 0.090, 0.110, 0.130, 
+        0.150, 0.170, 0.190, 0.220, 0.260, 
+        0.300
+    };
+    int shots = 500;
+
+    run_full_experiment(distances, probabilities, shots);
+
+    return 0;
+
+    /*
+    std::vector<int> distances = {
+        3, 5, 7, 9, 11, 13, 15, 17
+    };
+    
+    std::vector<double> probabilities = {
+        0.005, 0.008, 0.012, 0.018, 0.028, 
+        0.042, 0.065, 0.090, 0.110, 0.130, 
+        0.150, 0.170, 0.190, 0.220, 0.260, 
+        0.300
+    };
+    
+    int shots = 1000;
+
+    // Run 2D Code Capacity
+    // run_threshold_sweep(distances, probabilities, shots, NoiseModel::DEPOLARIZING, 0.0, 10.0);
+
+    // Run 3D Phenomenological
+    run_threshold_sweep(distances, probabilities, shots, NoiseModel::DEPOLARIZING, 1.0, 10.0);
+
+    return 0;
+    */
+}
+
+
+---
+./noise.cpp
+---
+#include <iostream>
+#include <random>
+#include <thread>
+#include "simulate.hpp"
+#include "noise.hpp"
+
+thread_local std::mt19937 rng(std::random_device{}() + std::hash<std::thread::id>{}(std::this_thread::get_id()));
+
+void sample_physical_noise(Lattice &lat, const SimConfig &config) {
+    std::uniform_real_distribution<double> prob(0.0, 1.0);
+
+    if (config.noise_model == NoiseModel::INDEPENDENT) {
+        // Independent X and Z trials
+        for (int q = 0; q < lat.num_qubits; q++) {
+            bool err_x = (prob(rng) < config.p_ind);
+            bool err_z = (prob(rng) < config.p_ind);
+
+            if (err_x && err_z) {
+                lat.errors[q] = static_cast<Pauli>(lat.errors[q] ^ Pauli::Y);
+            } else if (err_x) {
+                lat.errors[q] = static_cast<Pauli>(lat.errors[q] ^ Pauli::X);
+            } else if (err_z) {
+                lat.errors[q] = static_cast<Pauli>(lat.errors[q] ^ Pauli::Z);
+            }
+        }
+    } else {
+        // Mutually Exclusive Models: Depolarizing and Biased
+        for (int q = 0; q < lat.num_qubits; q++) {
+            double r = prob(rng);
+            Pauli error = Pauli::I;
+
+            if (r < config.p_x) error = Pauli::X;
+            else if (r < config.p_x + config.p_y) error = Pauli::Y;
+            else if (r < config.p_x + config.p_y + config.p_z) error = Pauli::Z;
+
+            if (error != Pauli::I) {
+                lat.errors[q] = static_cast<Pauli>(lat.errors[q] ^ error); 
+            }
+        }
+    }
+}
+
+void sample_measurement_noise(std::vector<int>& syndrome, const SimConfig &config) {
+    if (config.p_meas <= 0.0) return;
+
+    std::uniform_real_distribution<double> prob(0.0, 1.0);
+    for (size_t i = 0; i < syndrome.size(); i++) {
+        if (prob(rng) < config.p_meas) {
+            syndrome[i] ^= 1; 
+        }
+    }
+}
+
+void print_noise(const Lattice &lat) {
+    std::cout << "\n=== Noise ===\n";
+    bool any = false;
+    for (int q = 0; q < lat.num_qubits; q++) {
+        if (lat.errors[q] != Pauli::I) {
+            any = true;
+            int x, y;
+            qubit_coords(lat.d, q, x, y);
+            char type = (lat.errors[q] == Pauli::X ? 'X' :
+                         lat.errors[q] == Pauli::Z ? 'Z' : 'Y');
+            std::cout << "q(" << x << "," << y << ")=" << type << " ";
+        }
+    }
+    if (!any) std::cout << "none";
+    std::cout << "\n";
+}
+
+
+---
+./noise.hpp
+---
+#ifndef NOISE_HPP
+#define NOISE_HPP
+
+#include "lattice.hpp"
+
+void sample_physical_noise(Lattice &lat, const SimConfig &config);
+void sample_measurement_noise(std::vector<int>& syndrome, const SimConfig &config);
+void print_noise(const Lattice &lat);
+
+#endif
+
+
+---
+./plot_thresholds.py
+---
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from matplotlib.backends.backend_pdf import PdfPages
+import numpy as np
+import glob
+import os
+import re
+
+def plot_threshold(csv_filepath, pdf_pages=None):
+    try:
+        df = pd.read_csv(csv_filepath)
+    except Exception as e:
+        print(f"  Error reading {csv_filepath}: {e}")
+        return
+
+    plt.style.use('seaborn-v0_8-whitegrid')
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    distances = df['d'].unique()
+    distances.sort()
+    
+    colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(distances)))
+
+    for d, color in zip(distances, colors):
+        subset = df[df['d'] == d]
+        
+        ax.plot(
+            subset['p'], 
+            subset['logical_error_rate'], 
+            marker='o',      
+            linestyle='-', 
+            label=f'd = {d}', 
+            color=color,
+            linewidth=2,
+            markersize=6
+        )
+
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    
+    ax.set_xlabel('Total Physical Error Rate (p)', fontsize=14)
+    ax.set_ylabel('Logical Error Rate (p_L)', fontsize=14)
+    
+    filename = os.path.basename(csv_filepath)
+    title_parts = []
+    
+    if "ind" in filename: title_parts.append("Independent Noise")
+    elif "dep" in filename: title_parts.append("Depolarizing Noise")
+    elif "bias" in filename: 
+        match = re.search(r'bias([0-9.]+)', filename)
+        eta = match.group(1) if match else "Z"
+        title_parts.append(f"Biased Noise (\u03B7={eta})")
+
+    if "measRatio0.0_" in filename or "measRatio0_" in filename: 
+        title_parts.append("Code Capacity (2D)")
+    else:
+        match = re.search(r'measRatio([0-9.]+)', filename)
+        if match:
+            title_parts.append(f"Meas Ratio: {match.group(1)} (3D)")
+        else:
+            title_parts.append("Phenomenological (3D)")
+            
+    ax.set_title(f"Surface Code Threshold\n{' | '.join(title_parts)}", fontsize=16)
+    
+    ax.tick_params(axis='both', which='major', labelsize=12)
+    ax.grid(True, which="major", ls="-", alpha=0.6)
+    ax.grid(True, which="minor", ls="--", alpha=0.3)
+    ax.legend(fontsize=12, loc='lower right')
+
+    output_image = os.path.splitext(csv_filepath)[0] + '.pdf'
+    plt.tight_layout()
+    plt.savefig(output_image, dpi=300)
+    
+    if pdf_pages:
+        pdf_pages.savefig(fig)
+        
+    plt.close(fig)
+    print(f"  -> Plot saved to {output_image}")
+
+def main():
+    results_dir = 'results'
+    
+    if not os.path.exists(results_dir):
+        print(f"Error: Directory '{results_dir}' not found. Run the C++ simulation first.")
+        return
+
+    old_pdfs = glob.glob(os.path.join(results_dir, '*.pdf'))
+    if old_pdfs:
+        print(f"Purging {len(old_pdfs)} old PDF(s) from results directory...")
+        for pdf_file in old_pdfs:
+            try:
+                os.remove(pdf_file)
+            except OSError as e:
+                print(f"  Error deleting {pdf_file}: {e}")
+
+    csv_files = glob.glob(os.path.join(results_dir, '*.csv'))
+    
+    if not csv_files:
+        print(f"No CSV files found in '{results_dir}'.")
+        return
+        
+    print(f"Found {len(csv_files)} CSV file(s). Generating plots...")
+    
+    combined_pdf_path = os.path.join(results_dir, 'all_thresholds_combined.pdf')
+    
+    with PdfPages(combined_pdf_path) as pdf:
+        for csv_file in csv_files:
+            print(f"Processing {csv_file}...")
+            plot_threshold(csv_file, pdf_pages=pdf)
+            
+    print(f"\nAll plots generated successfully!")
+    print(f"Combined PDF saved to: {combined_pdf_path}")
+
+if __name__ == "__main__":
+    main()
+
+
+---
+./simulate.cpp
+---
+#include "simulate.hpp"
+#include "syndrome.hpp"
+#include "correction.hpp"
+#include "noise.hpp"
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <sstream>
+#include <future>
+#include <thread>
+# include <algorithm>
+
+LogicalResult run_single_simulation(const SimConfig& config, Lattice& lat, const DecoderGraph& x_graph, const DecoderGraph& z_graph) {
+    lat.reset();
+
+    compute_syndrome(lat, config);
+    
+    std::vector<CorrectionMatch> x_matches = run_mwpm(lat.x_defects, x_graph, lat);
+    std::vector<CorrectionMatch> z_matches = run_mwpm(lat.z_defects, z_graph, lat);
+    
+    apply_correction(lat, x_matches, DecoderGraph::X);
+    apply_correction(lat, z_matches, DecoderGraph::Z);
+    
+    return evaluate_logical_errors(lat);
+}
+
+void run_threshold_sweep(const std::vector<int>& distances, const std::vector<double>& probabilities, int num_shots, NoiseModel noise_model, double p_meas_ratio, double bias_eta = 100.0) {
+    std::ostringstream filename_stream;
+    filename_stream << "results/sweep_";
+    if (noise_model == NoiseModel::INDEPENDENT) filename_stream << "ind";
+    else if (noise_model == NoiseModel::DEPOLARIZING) filename_stream << "dep";
+    else if (noise_model == NoiseModel::BIASED) filename_stream << "bias" << bias_eta;
+    
+    filename_stream << "_measRatio" << p_meas_ratio << "_shots" << num_shots;
+    if (!distances.empty()) filename_stream << "_d" << distances.front() << "to" << distances.back();
+    filename_stream << ".csv";
+    std::string filename = filename_stream.str();
+
+    std::ofstream outfile(filename);
+    outfile << "d,p,logical_error_rate,total_fails,num_shots\n";
+
+    std::cout << "\n=== Starting Threshold Sweep ===\n";
+    std::cout << "Output: " << filename << "\n";
+
+    int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4;
+
+    for (int d : distances) {
+        std::cout << "\nRunning sweep for d = " << d << "...\n";
+        
+        for (double p : probabilities) {
+            SimConfig config(d, p, noise_model, p_meas_ratio, bias_eta, false);
+
+            double p_err_x_graph = config.p_z + config.p_y; 
+            double p_err_z_graph = config.p_x + config.p_y; 
+
+            auto calc_weight = [](double prob) {
+                if (prob <= 0.0 || prob >= 1.0) return 100000; 
+                return std::max(1, static_cast<int>(-100.0 * std::log(prob / (1.0 - prob))));
+            };
+
+            int w_x_spatial = calc_weight(p_err_x_graph);
+            int w_z_spatial = calc_weight(p_err_z_graph);
+            int w_temporal  = calc_weight(config.p_meas);
+
+            // Normalize weights to prevent overflow and maintain relative ratios
+            int min_w = std::min(w_x_spatial, w_z_spatial);
+            if (config.p_meas > 0.0) {
+                min_w = std::min(min_w, w_temporal);
+            }
+            w_x_spatial = std::max(1, w_x_spatial / min_w);
+            w_z_spatial = std::max(1, w_z_spatial / min_w);
+            w_temporal  = (config.p_meas > 0.0) ? std::max(1, w_temporal / min_w) : 100000;
+
+            Lattice dummy_lat(d);
+            int num_rounds = (p_meas_ratio > 0.0) ? d : 1; 
+            DecoderGraph x_graph(dummy_lat, DecoderGraph::X, num_rounds, w_x_spatial, w_temporal);
+            DecoderGraph z_graph(dummy_lat, DecoderGraph::Z, num_rounds, w_z_spatial, w_temporal);
+
+            std::vector<std::future<int>> futures;
+
+            for (int t = 0; t < num_threads; t++) {
+                int shots_for_thread = num_shots / num_threads + (t < (num_shots % num_threads) ? 1 : 0);
+
+                futures.push_back(std::async(std::launch::async, [shots_for_thread, config, &x_graph, &z_graph, d]() {
+                    int thread_fails = 0;
+                    Lattice thread_lat(d); 
+                    
+                    for (int i = 0; i < shots_for_thread; i++) {
+                        LogicalResult res = run_single_simulation(config, thread_lat, x_graph, z_graph);
+                        if (!res.success) thread_fails++;
+                    }
+                    return thread_fails;
+                }));
+            }
+
+            int total_fails = 0;
+            for (auto& f : futures) {
+                total_fails += f.get();
+            }
+
+            double p_L = static_cast<double>(total_fails) / num_shots;
+            
+            outfile << d << "," << p << "," << p_L << "," << total_fails << "," << num_shots << "\n";
+            std::cout << "  p = " << std::left << std::setw(6) << p 
+                      << " | p_L = " << p_L 
+                      << " (" << total_fails << "/" << num_shots << ")\n";
+
+            if (p_L >= 0.66) {
+                std::cout << "  -> Saturation reached. Skipping remaining probabilities.\n";
+                break;
+            }
+        }
+    }
+    outfile.close();
+}
+
+//Runs a single verbose monte carlo for a given configuration, for debugging
+void run_monte_carlo(const SimConfig& config, int num_shots) {
+    std::cout << "Starting Monte Carlo...\n";
+
+    double p_err_x_graph = config.p_z + config.p_y; 
+    double p_err_z_graph = config.p_x + config.p_y; 
+
+    auto calc_weight = [](double prob) {
+        if (prob <= 0.0 || prob >= 1.0) return 100000;
+        return std::max(1, static_cast<int>(-100.0 * std::log(prob / (1.0 - prob))));
+    };
+
+    int w_x_spatial = calc_weight(p_err_x_graph);
+    int w_z_spatial = calc_weight(p_err_z_graph);
+    int w_temporal  = calc_weight(config.p_meas);
+
+    Lattice lat(config.d); 
+    int num_rounds = (config.p_meas_ratio > 0.0) ? config.d : 1;
+    
+    DecoderGraph x_graph(lat, DecoderGraph::X, num_rounds, w_x_spatial, w_temporal);
+    DecoderGraph z_graph(lat, DecoderGraph::Z, num_rounds, w_z_spatial, w_temporal);
+
+    int logical_x_fails = 0;
+    int logical_z_fails = 0;
+    int total_fails = 0;
+
+    for (int i = 0; i < num_shots; i++) {
+        LogicalResult res = run_single_simulation(config, lat, x_graph, z_graph);
+
+        if (res.logical_x_error) logical_x_fails++;
+        if (res.logical_z_error) logical_z_fails++;
+        if (!res.success) total_fails++;
+
+        if ((i + 1) % (num_shots / 10) == 0) {
+            std::cout << "  Progress: " << (i + 1) << " / " << num_shots << "\n";
+        }
+    }
+
+    double p_L = static_cast<double>(total_fails) / num_shots;
+    std::cout << "\n=== Monte Carlo Results ===\n";
+    std::cout << "Total Fails: " << total_fails << " / " << num_shots << "\n";
+    std::cout << "Logical Error Rate (p_L): " << p_L << "\n";
+    std::cout << "===========================\n";
+}
+
+//Runs a single simulation with detailed printouts, for debugging
+void run_verbose_simulation(const SimConfig& config) {
+    std::cout << "[simulate] running...\n";
+
+    std::cout << "[lattice] initializing lattice for d=" << config.d << "\n";
+    Lattice lat(config.d);
+    lat.print();
+    
+    double p_err_x_graph = config.p_z + config.p_y; 
+    double p_err_z_graph = config.p_x + config.p_y; 
+
+    auto calc_weight = [](double prob) {
+        if (prob <= 0.0 || prob >= 1.0) return 100000;
+        return std::max(1, static_cast<int>(-100.0 * std::log(prob / (1.0 - prob))));
+    };
+
+    int w_x_spatial = calc_weight(p_err_x_graph);
+    int w_z_spatial = calc_weight(p_err_z_graph);
+    int w_temporal  = calc_weight(config.p_meas);
+
+    int num_rounds = (config.p_meas_ratio > 0.0) ? config.d : 1;
+    
+    std::cout << "[decoder] building X decoder graph...\n";
+    DecoderGraph x_graph(lat, DecoderGraph::X, num_rounds, w_x_spatial, w_temporal);
+    x_graph.print();
+    
+    std::cout << "[decoder] building Z decoder graph...\n";
+    DecoderGraph z_graph(lat, DecoderGraph::Z, num_rounds, w_z_spatial, w_temporal);
+    z_graph.print();
+
+    std::cout << "[syndrome] sampling noise and computing defects...\n";
+    compute_syndrome(lat, config);
+    print_defects(lat);
+
+    std::cout << "[decoder] building X syndrome graph and running mwpm...\n";
+    std::vector<CorrectionMatch> x_matches = run_mwpm(lat.x_defects, x_graph, lat);
+    print_matches(x_matches);
+    
+    std::cout << "[decoder] building Z syndrome graph and running mwpm...\n";
+    std::vector<CorrectionMatch> z_matches = run_mwpm(lat.z_defects, z_graph, lat);
+    print_matches(z_matches);
+
+    std::cout << "[correction] Applying corrections...\n";
+    apply_correction(lat, x_matches, DecoderGraph::X);
+    apply_correction(lat, z_matches, DecoderGraph::Z);
+    print_noise(lat);
+
+    std::cout << "[logical] evaluating logical errors...\n";
+    LogicalResult result = evaluate_logical_errors(lat);
+    print_logical_results(result);
+
+    std::cout << "[simulate] finished.\n";
+}
+
+
+---
+./simulate.hpp
+---
+#ifndef SIMULATE_HPP
+#define SIMULATE_HPP
+
+#include "logical.hpp"
+#include <cmath>
+
+enum class NoiseModel {
+    INDEPENDENT,
+    DEPOLARIZING,
+    BIASED
+};
+
+struct SimConfig {
+    int d;
+    double p;
+    NoiseModel noise_model;
+    double p_meas_ratio; 
+    double bias_eta; 
+    bool verbose;
+
+    // Pre-calculated exact probabilities
+    double p_x;
+    double p_y;
+    double p_z;
+    double p_meas;
+    double p_ind; // Used only for independent Bernoulli trials
+
+    // Constructor to automatically compute the exact Pauli probabilities
+    SimConfig(int d_, double p_, NoiseModel model_, double meas_ratio_, double eta_ = 10.0, bool v_ = false)
+        : d(d_), p(p_), noise_model(model_), p_meas_ratio(meas_ratio_), bias_eta(eta_), verbose(v_) {
+        
+        p_meas = p * p_meas_ratio;
+        p_x = p_y = p_z = p_ind = 0.0;
+
+        if (noise_model == NoiseModel::INDEPENDENT) {
+            p_ind = 1.0 - std::sqrt(1.0 - p);
+            p_x = p_ind;
+            p_z = p_ind;
+            p_y = p_ind * p_ind; 
+        } 
+        else if (noise_model == NoiseModel::DEPOLARIZING) {
+            p_x = p / 3.0;
+            p_z = p / 3.0;
+            p_y = p / 3.0;
+        } 
+        else if (noise_model == NoiseModel::BIASED) {
+            p_z = p * (bias_eta / (bias_eta + 1.0));
+            double p_bit_flip = p * (1.0 / (bias_eta + 1.0));
+            p_x = p_bit_flip / 2.0;
+            p_y = p_bit_flip / 2.0;
+        }
+    }
+};
+
+void run_verbose_simulation(const SimConfig& config);
+void run_monte_carlo(const SimConfig& config, int num_shots);
+void run_threshold_sweep(const std::vector<int>& distances, const std::vector<double>& probabilities, int num_shots, NoiseModel noise_model, double p_meas_ratio, double bias_eta);
+
+#endif
+
+
+---
+./syndrome.cpp
+---
+#include <iostream>
+#include <vector>
+#include <random>
+#include <thread>
+#include "syndrome.hpp"
+#include "noise.hpp"
+#include "simulate.hpp"
+
+void compute_syndrome(Lattice& lat, const SimConfig& config) {
+    lat.x_defects.clear();
+    lat.z_defects.clear();
+
+    // 0.0 ratio = Code Capacity (1 round), otherwise Phenomenological (d rounds)
+    int num_rounds = (config.p_meas_ratio > 0.0) ? lat.d : 1;
+
+    std::vector<int> prev_x_syndrome(lat.num_x_stabilizers, 0);
+    std::vector<int> prev_z_syndrome(lat.num_z_stabilizers, 0);
+
+    for (int t = 0; t < num_rounds; t++) {
+        sample_physical_noise(lat, config);
+
+        if (config.verbose) {
+            std::cout << "[noise] round t = " << t << " noise state:";
+            print_noise(lat);
+        }
+
+        std::vector<int> curr_x_syndrome(lat.num_x_stabilizers, 0);
+        std::vector<int> curr_z_syndrome(lat.num_z_stabilizers, 0);
+
+        // X-Stabilizers detect Z and Y errors
+        for (int i = 0; i < lat.num_x_stabilizers; i++) {
+            for (int j = 0; j < lat.x_stabilizers[i].degree; j++) {
+                Pauli error = lat.errors[lat.x_stabilizers[i].neighbors[j]];
+                if (error == Z || error == Y) curr_x_syndrome[i] ^= 1;
+            }
+        }
+
+        // Z-Stabilizers detect X and Y errors
+        for (int i = 0; i < lat.num_z_stabilizers; i++) {
+            for (int j = 0; j < lat.z_stabilizers[i].degree; j++) {
+                Pauli error = lat.errors[lat.z_stabilizers[i].neighbors[j]];
+                if (error == X || error == Y) curr_z_syndrome[i] ^= 1;
+            }
+        }
+
+        // Apply measurement noise to all but the final 'perfect' round
+        if (config.p_meas_ratio > 0.0 && t < num_rounds - 1) {
+            sample_measurement_noise(curr_x_syndrome, config);
+            sample_measurement_noise(curr_z_syndrome, config);
+        }
+
+        // Compare current syndrome to previous round to find Defects
+        for (int i = 0; i < lat.num_x_stabilizers; i++) {
+            if (curr_x_syndrome[i] != prev_x_syndrome[i]) {
+                lat.x_defects.push_back({i, t});
+            }
+        }
+        for (int i = 0; i < lat.num_z_stabilizers; i++) {
+            if (curr_z_syndrome[i] != prev_z_syndrome[i]) {
+                lat.z_defects.push_back({i, t});
+            }
+        }
+
+        prev_x_syndrome = curr_x_syndrome;
+        prev_z_syndrome = curr_z_syndrome;
+    }
+}
+
+void print_defects(const Lattice &lat) {
+    std::cout << "\n=== DEFECTS ===\n";
+
+    std::cout << "X defects:\n";
+    for (const auto& defect : lat.x_defects) {
+        const auto &s = lat.x_stabilizers[defect.stab_idx];
+        std::cout << "  X[" << defect.stab_idx << "] @("
+                  << s.x << "," << s.y << ", t=" << defect.t << ")\n";
+    }
+
+    std::cout << "Z defects:\n";
+    for (const auto& defect : lat.z_defects) {
+        const auto &s = lat.z_stabilizers[defect.stab_idx];
+        std::cout << "  Z[" << defect.stab_idx << "] @("
+                  << s.x << "," << s.y << ", t=" << defect.t << ")\n";
+    }
+
+    std::cout << "================\n";
+}
+
+
+---
+./syndrome.hpp
+---
+#ifndef SYNDROME_HPP
+#define SYNDROME_HPP
+
+#include "lattice.hpp"
+#include "simulate.hpp"
+
+void compute_syndrome(Lattice &lat, const SimConfig& config);
+void print_defects(const Lattice &lat);
+
+#endif
