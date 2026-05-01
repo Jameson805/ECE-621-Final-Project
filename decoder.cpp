@@ -6,11 +6,11 @@
 
 using namespace lemon;
 
-DecoderGraph::DecoderGraph(const Lattice &lat, Type t, int rounds) : type(t), num_rounds(rounds), weight(g) {
-    build(lat);
+DecoderGraph::DecoderGraph(const Lattice &lat, Type t, int rounds, int s_weight, int t_weight) : type(t), num_rounds(rounds), weight(g) {
+    build(lat, s_weight, t_weight);
 }
 
-void DecoderGraph::build(const Lattice &lat) {
+void DecoderGraph::build(const Lattice &lat, int s_weight, int t_weight) {
     const std::vector<Stabilizer> &stabs = (type == X) ? lat.x_stabilizers : lat.z_stabilizers;
 
     const int num_stabs = stabs.size();
@@ -50,7 +50,7 @@ void DecoderGraph::build(const Lattice &lat) {
                 auto u = stab_nodes[t * num_stabs + a.stabs[0]];
                 auto v = stab_nodes[t * num_stabs + a.stabs[1]];
                 auto e = g.addEdge(u, v);
-                weight[e] = 1;
+                weight[e] = s_weight;
             }
         }
 
@@ -60,7 +60,7 @@ void DecoderGraph::build(const Lattice &lat) {
                 auto u = stab_nodes[t * num_stabs + s];
                 auto v = stab_nodes[(t + 1) * num_stabs + s];
                 auto e = g.addEdge(u, v);
-                weight[e] = 1;
+                weight[e] = t_weight;
             }
         }
     }

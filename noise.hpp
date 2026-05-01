@@ -3,7 +3,8 @@
 
 #include "lattice.hpp"
 
-void sample_noise(Lattice &lat, double p);
+void sample_physical_noise(Lattice &lat, const SimConfig &config);
+void sample_measurement_noise(std::vector<int>& syndrome, const SimConfig &config);
 void print_noise(const Lattice &lat);
 
 #endif

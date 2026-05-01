@@ -9,9 +9,9 @@ class DecoderGraph {
 public:
     enum Type { X, Z };
 
-    DecoderGraph(const Lattice &lat, Type t, int num_rounds = 1);
+    DecoderGraph(const Lattice &lat, Type t, int num_rounds = 1, int s_weight = 1, int t_weight = 1);
 
-    void build(const Lattice &lat);
+    void build(const Lattice &lat, int s_weight, int t_weight);
     void print() const;
 
     const lemon::ListGraph& graph() const { return g; }
