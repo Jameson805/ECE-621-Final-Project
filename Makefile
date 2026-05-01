@@ -1,5 +1,6 @@
 CXX = g++
-CXXFLAGS = -Wall -Wextra -std=c++17 -O2
+
+CXXFLAGS = -Wall -Wextra -std=c++17 -O3 -pthread
 
 TARGET = sim
 
@@ -16,4 +17,3 @@ $(TARGET): $(OBJS)
 
 clean:
 	rm -f $(OBJS) $(TARGET)
-	

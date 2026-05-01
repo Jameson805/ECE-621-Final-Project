@@ -16,6 +16,7 @@ struct SpaceTimeDefect {
     int t;
 };
 
+// Allows bitwise XOR for easy Pauli multiplication
 enum Pauli {
     I = 0,
     X = 1,

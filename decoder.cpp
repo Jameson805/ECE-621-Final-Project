@@ -1,7 +1,8 @@
 #include "decoder.hpp"
 #include <lemon/dijkstra.h> 
 #include <lemon/matching.h>
-#include <string>
+#include <iostream>
+#include <algorithm>
 
 using namespace lemon;
 
@@ -10,15 +11,18 @@ DecoderGraph::DecoderGraph(const Lattice &lat, Type t, int rounds) : type(t), nu
 }
 
 void DecoderGraph::build(const Lattice &lat) {
-    const std::vector<Stabilizer> &stabs =
-        (type == X) ? lat.x_stabilizers : lat.z_stabilizers;
+    const std::vector<Stabilizer> &stabs = (type == X) ? lat.x_stabilizers : lat.z_stabilizers;
 
     const int num_stabs = stabs.size();
     const int num_qubits = lat.num_qubits;
 
-    stab_nodes.resize(num_stabs);
-    for (int i = 0; i < num_stabs; i++) {
-        stab_nodes[i] = g.addNode();
+    stab_nodes.clear();
+    stab_nodes.resize(num_rounds * num_stabs);
+
+    for (int t = 0; t < num_rounds; t++) {
+        for (int i = 0; i < num_stabs; i++) {
+            stab_nodes[t * num_stabs + i] = g.addNode();
+        }
     }
 
     struct QubitAdj {
@@ -32,20 +36,32 @@ void DecoderGraph::build(const Lattice &lat) {
 
         for (int j = 0; j < stab.degree; j++) {
             int q = stab.neighbors[j];
-
             if (adj[q].count < 2) {
                 adj[q].stabs[adj[q].count++] = s;
             }
         }
     }
 
-    for (int q = 0; q < num_qubits; q++) {
-        const QubitAdj &a = adj[q];
-        if (a.count == 2) {
-            auto u = stab_nodes[a.stabs[0]];
-            auto v = stab_nodes[a.stabs[1]];
-            auto e = g.addEdge(u, v);
-            weight[e] = 1;
+    for (int t = 0; t < num_rounds; t++) {
+        // 1. Spatial Edges (Data Errors)
+        for (int q = 0; q < num_qubits; q++) {
+            const QubitAdj &a = adj[q];
+            if (a.count == 2) {
+                auto u = stab_nodes[t * num_stabs + a.stabs[0]];
+                auto v = stab_nodes[t * num_stabs + a.stabs[1]];
+                auto e = g.addEdge(u, v);
+                weight[e] = 1;
+            }
+        }
+
+        // 2. Temporal Edges (Measurement Errors)
+        if (t < num_rounds - 1) {
+            for (int s = 0; s < num_stabs; s++) {
+                auto u = stab_nodes[t * num_stabs + s];
+                auto v = stab_nodes[(t + 1) * num_stabs + s];
+                auto e = g.addEdge(u, v);
+                weight[e] = 1;
+            }
         }
     }
 }
@@ -57,10 +73,7 @@ void DecoderGraph::print() const {
         auto u = g.u(e);
         auto v = g.v(e);
 
-        std::cout << g.id(u)
-                  << " <--> "
-                  << g.id(v)
-                  << " (w=" << weight[e] << ")\n";
+        std::cout << g.id(u) << " <--> " << g.id(v) << " (w=" << weight[e] << ")\n";
     }
 
     std::cout << "===========================\n";
@@ -91,27 +104,33 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defect
         }
     }
 
+    DecoderGraph::Type type = dec_graph.getType();
+    int num_stabs = (type == DecoderGraph::X) ? lat.num_x_stabilizers : lat.num_z_stabilizers;
+
     for (int i = 0; i < N; i++) {
         int stab_u = defects[i].stab_idx;
-        lemon::ListGraph::Node dec_u = dec_graph.stab_nodes[stab_u]; 
-
+        int t_u = defects[i].t; 
+        
+        lemon::ListGraph::Node dec_u = dec_graph.stab_nodes[t_u * num_stabs + stab_u]; 
         lemon::Dijkstra<lemon::ListGraph, lemon::ListGraph::EdgeMap<int>> dijkstra(dec_graph.graph(), dec_graph.weights());
         dijkstra.run(dec_u);
 
-        // Edges between defects (Cost = physical Dijkstra distance)
+        // Edges between defects (Cost = physical space-time Dijkstra distance)
         for (int j = i + 1; j < N; j++) {
             int stab_v = defects[j].stab_idx;
-            lemon::ListGraph::Node dec_v = dec_graph.stab_nodes[stab_v];
+            int t_v = defects[j].t;
+            
+            lemon::ListGraph::Node dec_v = dec_graph.stab_nodes[t_v * num_stabs + stab_v];
             int dist = dijkstra.dist(dec_v);
             
             auto e = match_graph.addEdge(nodes[i], nodes[j]);
             match_weight[e] = MAX_WEIGHT - dist; 
         }
 
-        // Edge from defect to its own virtual boundary (Cost = geometric distance, efficient but not modular)
-        const Stabilizer& s = (dec_graph.getType() == DecoderGraph::X) ? lat.x_stabilizers[stab_u] : lat.z_stabilizers[stab_u];
+        // Edge from defect to its own virtual spatial boundary 
+        const Stabilizer& s = (type == DecoderGraph::X) ? lat.x_stabilizers[stab_u] : lat.z_stabilizers[stab_u];
         
-        int dist_to_bound = (dec_graph.getType() == DecoderGraph::X) 
+        int dist_to_bound = (type == DecoderGraph::X) 
                             ? std::min(s.y + 1, lat.d - 1 - s.y) 
                             : std::min(s.x + 1, lat.d - 1 - s.x);
 
@@ -125,7 +144,6 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defect
     for(int i = 0; i < N; i++) {
         lemon::ListGraph::Node u = nodes[i];
         lemon::ListGraph::Node mate = mwpm.mate(u);
-        
         int mate_idx = -1;
         for(int j = 0; j < 2 * N; j++) {
             if (nodes[j] == mate) {
@@ -134,7 +152,7 @@ std::vector<CorrectionMatch> run_mwpm(const std::vector<SpaceTimeDefect>& defect
             }
         }
 
-        // If a defect mated with ANY virtual boundary (index >= N), it routes to boundary
+        // Because we only push `stab_idx`, 3D temporal pairs are naturally projected to 2D
         if (mate_idx >= N) {
             results.push_back({defects[i].stab_idx, -1});
         } else if (i < mate_idx) {

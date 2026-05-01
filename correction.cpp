@@ -3,7 +3,6 @@
 #include <cmath>
 #include <algorithm>
 
-// Bitwise XOR to apply Pauli multiplication
 static void apply_pauli(Lattice& lat, int q, Pauli p) {
     if (p == Pauli::I) return;
     lat.errors[q] = static_cast<Pauli>(lat.errors[q] ^ p);
@@ -82,8 +81,11 @@ void apply_correction(Lattice& lat, const std::vector<CorrectionMatch>& matches,
 
     for (const auto& match : matches) {
         if (match.defect_2 == -1) {
+            // Route to spatial boundary
             route_to_boundary(lat, stabs[match.defect_1], type, correction_pauli);
         } else {
+            if (match.defect_1 == match.defect_2) continue; 
+            // Route spatial defect to spatial defect
             route_manhattan(lat, stabs[match.defect_1], stabs[match.defect_2], correction_pauli);
         }
     }

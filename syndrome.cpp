@@ -1,11 +1,12 @@
 #include <iostream>
 #include <vector>
 #include <random>
+#include <thread>
 #include "syndrome.hpp"
 #include "noise.hpp"
 
 static void apply_measurement_noise(std::vector<int>& syndrome, double p) {
-    static std::mt19937 rng(54321);
+    thread_local std::mt19937 rng(std::random_device{}() + std::hash<std::thread::id>{}(std::this_thread::get_id()));
     std::uniform_real_distribution<double> prob(0.0, 1.0);
     for (size_t i = 0; i < syndrome.size(); i++) {
         if (prob(rng) < p) {
