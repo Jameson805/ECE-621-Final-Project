@@ -1,6 +1,7 @@
 CXX = g++
 
 CXXFLAGS = -Wall -Wextra -std=c++17 -O3 -pthread
+LIBS = -lstdc++fs
 
 TARGET = sim
 
@@ -10,7 +11,7 @@ OBJS = $(SRCS:.cpp=.o)
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) $(LIBS)
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@

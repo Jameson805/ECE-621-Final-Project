@@ -24,58 +24,38 @@ LogicalResult run_single_simulation(const SimConfig& config, Lattice& lat, const
     return evaluate_logical_errors(lat);
 }
 
-void run_threshold_sweep(const std::vector<int>& distances, const std::vector<double>& probabilities, int num_shots, NoiseModel noise_model, double p_meas_ratio, double bias_eta) {
+void run_threshold_sweep(const std::vector<int>& distances, const std::vector<double>& probabilities, int num_shots, NoiseModel noise_model, double p_meas_ratio, double bias_eta = 100.0) {
     std::ostringstream filename_stream;
     filename_stream << "results/sweep_";
-    
     if (noise_model == NoiseModel::INDEPENDENT) filename_stream << "ind";
     else if (noise_model == NoiseModel::DEPOLARIZING) filename_stream << "dep";
     else if (noise_model == NoiseModel::BIASED) filename_stream << "bias" << bias_eta;
-
-    filename_stream << "_measRatio" << p_meas_ratio;
-    filename_stream << "_shots" << num_shots;
-    if (!distances.empty()) {
-        filename_stream << "_d" << distances.front() << "to" << distances.back();
-    }
-    filename_stream << ".csv";
     
+    filename_stream << "_measRatio" << p_meas_ratio << "_shots" << num_shots;
+    if (!distances.empty()) filename_stream << "_d" << distances.front() << "to" << distances.back();
+    filename_stream << ".csv";
     std::string filename = filename_stream.str();
 
     std::ofstream outfile(filename);
-    if (!outfile.is_open()) {
-        std::cerr << "Error: Could not open " << filename << " for writing.\n";
-        return;
-    }
     outfile << "d,p,logical_error_rate,total_fails,num_shots\n";
 
     std::cout << "\n=== Starting Threshold Sweep ===\n";
-    std::cout << "Model: ";
-    if (noise_model == NoiseModel::INDEPENDENT) std::cout << "Independent ";
-    else if (noise_model == NoiseModel::DEPOLARIZING) std::cout << "Depolarizing ";
-    else if (noise_model == NoiseModel::BIASED) std::cout << "Biased (eta=" << bias_eta << ") ";
-    
-    std::cout << "| Meas Ratio: " << p_meas_ratio << "\n";
     std::cout << "Output: " << filename << "\n";
 
     int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) num_threads = 4; // Fallback
+    if (num_threads == 0) num_threads = 4;
 
     for (int d : distances) {
         std::cout << "\nRunning sweep for d = " << d << "...\n";
         
-        // Loop over probabilities FIRST, because graph weights depend on p!
         for (double p : probabilities) {
-            
-            // Instantiate config (Constructor auto-calculates p_x, p_y, p_z, p_meas)
             SimConfig config(d, p, noise_model, p_meas_ratio, bias_eta, false);
 
-            // Calculate graph error probabilities based on the physics model
             double p_err_x_graph = config.p_z + config.p_y; 
             double p_err_z_graph = config.p_x + config.p_y; 
 
-            // Helper lambda to calculate edge weights securely
             auto calc_weight = [](double prob) {
-                if (prob <= 0.0 || prob >= 1.0) return 100000; // Practically impossible
+                if (prob <= 0.0 || prob >= 1.0) return 100000; 
                 return std::max(1, static_cast<int>(-100.0 * std::log(prob / (1.0 - prob))));
             };
 
@@ -83,7 +63,15 @@ void run_threshold_sweep(const std::vector<int>& distances, const std::vector<do
             int w_z_spatial = calc_weight(p_err_z_graph);
             int w_temporal  = calc_weight(config.p_meas);
 
-            // Rebuild the graphs dynamically for THIS specific probability
+            // Normalize weights to prevent overflow and maintain relative ratios
+            int min_w = std::min(w_x_spatial, w_z_spatial);
+            if (config.p_meas > 0.0) {
+                min_w = std::min(min_w, w_temporal);
+            }
+            w_x_spatial = std::max(1, w_x_spatial / min_w);
+            w_z_spatial = std::max(1, w_z_spatial / min_w);
+            w_temporal  = (config.p_meas > 0.0) ? std::max(1, w_temporal / min_w) : 100000;
+
             Lattice dummy_lat(d);
             int num_rounds = (p_meas_ratio > 0.0) ? d : 1; 
             DecoderGraph x_graph(dummy_lat, DecoderGraph::X, num_rounds, w_x_spatial, w_temporal);
@@ -91,13 +79,12 @@ void run_threshold_sweep(const std::vector<int>& distances, const std::vector<do
 
             std::vector<std::future<int>> futures;
 
-            // Divide the num_shots evenly among your CPU cores
             for (int t = 0; t < num_threads; t++) {
                 int shots_for_thread = num_shots / num_threads + (t < (num_shots % num_threads) ? 1 : 0);
 
                 futures.push_back(std::async(std::launch::async, [shots_for_thread, config, &x_graph, &z_graph, d]() {
                     int thread_fails = 0;
-                    Lattice thread_lat(d); // Memory isolated per thread
+                    Lattice thread_lat(d); 
                     
                     for (int i = 0; i < shots_for_thread; i++) {
                         LogicalResult res = run_single_simulation(config, thread_lat, x_graph, z_graph);
@@ -107,7 +94,6 @@ void run_threshold_sweep(const std::vector<int>& distances, const std::vector<do
                 }));
             }
 
-            // Wait for all threads to finish and sum up the fails
             int total_fails = 0;
             for (auto& f : futures) {
                 total_fails += f.get();
@@ -121,14 +107,12 @@ void run_threshold_sweep(const std::vector<int>& distances, const std::vector<do
                       << " (" << total_fails << "/" << num_shots << ")\n";
 
             if (p_L >= 0.66) {
-                std::cout << "  -> Saturation reached (p_L >= 0.66). Skipping remaining probabilities for d=" << d << ".\n";
+                std::cout << "  -> Saturation reached. Skipping remaining probabilities.\n";
                 break;
             }
         }
     }
-    
     outfile.close();
-    std::cout << "=== Sweep Complete. Data saved to " << filename << " ===\n";
 }
 
 //Runs a single verbose monte carlo for a given configuration, for debugging
