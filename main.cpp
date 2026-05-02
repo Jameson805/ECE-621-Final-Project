@@ -4,12 +4,14 @@
 #include "simulate.hpp"
 
 void run_full_experiment(const std::vector<int>& distances, const std::vector<double>& probabilities, int shots) {
+    /*
     std::string dir_path = "results";
     if (std::experimental::filesystem::exists(dir_path)) {
         std::cout << "Purging old results directory...\n";
         std::experimental::filesystem::remove_all(dir_path);
     }
     std::experimental::filesystem::create_directory(dir_path);
+    */
 
     // Define the 4 measurement error ratios:
     // 0.0 = Code Capacity (2D baseline)
@@ -34,7 +36,7 @@ void run_full_experiment(const std::vector<int>& distances, const std::vector<do
 
 int main() {
     std::vector<int> distances = {
-        3, 5, 7, 9, 11, 13, 15, 17
+        3, 5, 7, 9, 11, 15, 17
     };
 
     std::vector<double> probabilities = {
@@ -45,7 +47,7 @@ int main() {
         0.5000
     };
 
-    int shots = 250;
+    int shots = 5000;
 
     run_full_experiment(distances, probabilities, shots);
 
